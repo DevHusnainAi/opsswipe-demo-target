@@ -6,7 +6,7 @@ const { createHmac, timingSafeEqual } = require('node:crypto');
 
 // Bad-release demo: commit this as false and push (infra/chaos.sh release). The host deploys it,
 // requests fail, and OpsSwipe offers a revert or AI fix PR, proven in CI before it can merge.
-const RELEASE_OK = true;
+const RELEASE_OK = false;
 
 const KEY = Buffer.from(process.env.CHAOS_KEY ?? '');
 const bootedAt = new Date().toISOString();
