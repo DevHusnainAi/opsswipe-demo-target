@@ -1,0 +1,34 @@
+# OpsSwipe proof: before a fix can be merged, replay the requests that failed in production
+# against this PR's build and run the tests. Edit the three commands below for your app.
+name: opsswipe-proof
+on: pull_request
+
+permissions:
+  contents: read
+  id-token: write # lets the run prove to OpsSwipe it came from this repo; no secrets needed
+
+jobs:
+  proof:
+    runs-on: ubuntu-latest
+    env:
+      INSTALL_COMMAND: npm install
+      TEST_COMMAND: npm test
+      START_COMMAND: npm start
+      PORT: '3000'
+      OPSSWIPE_PROOF_URL: https://mwkwhfqcgxossweqwibt.supabase.co/functions/v1/proof
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 22 }
+      - run: $INSTALL_COMMAND
+      - name: Tests
+        id: tests
+        run: if $TEST_COMMAND; then echo "passed=true" >> "$GITHUB_OUTPUT"; else echo "passed=false" >> "$GITHUB_OUTPUT"; fi
+      - name: Start this PR's build
+        run: |
+          $START_COMMAND &
+          for i in $(seq 60); do curl -s -o /dev/null "http://127.0.0.1:$PORT/" && break; sleep 1; done
+      - name: Replay production failures and report
+        env:
+          TESTS_PASSED: ${{ steps.tests.outputs.passed }}
+        run: node .opsswipe/proof.mjs "http://127.0.0.1:$PORT"
