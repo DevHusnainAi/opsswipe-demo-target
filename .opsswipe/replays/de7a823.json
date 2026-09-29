@@ -1,0 +1,11 @@
+{
+  "reverts": "de7a823b10606c1c54e1b8f9e767261608b320ba",
+  "samples": [
+    {
+      "at": "2026-09-29T18:43:29.348Z",
+      "path": "/api/price",
+      "method": "GET",
+      "status": 500
+    }
+  ]
+}
