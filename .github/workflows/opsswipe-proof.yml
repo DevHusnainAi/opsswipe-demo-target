@@ -5,7 +5,7 @@ on: pull_request
 
 permissions:
   contents: read
-  id-token: write # lets the run prove to OpsSwipe it came from this repo; no secrets needed
+  id-token: write # lets the reporter prove to OpsSwipe which repo and PR it ran for; no secrets needed
 
 jobs:
   proof:
@@ -19,24 +19,36 @@ jobs:
       OPSSWIPE_PROOF_URL: https://mwkwhfqcgxossweqwibt.supabase.co/functions/v1/proof
     steps:
       - uses: actions/checkout@v4
-      # The PR's own code (install scripts, tests, the app) runs only inside containers, on copies of the
-      # repo: it can't see this runner's memory, environment or OIDC token, and can't touch the reporter,
-      # which runs from the untouched checkout. Only OpsSwipe's own script can sign the proof.
-      - name: Tests (in a container)
+        with: { persist-credentials: false }
+      # The PR's own code (install scripts, tests, the app) runs only in containers: as a normal user, with
+      # no Linux capabilities or added privileges, and without this runner's environment or OIDC token.
+      # Tests get no network; the app runs on a network with no way out and is replayed from beside it.
+      # (GitHub runs this file as the PR has it, so this guards against a PR's code, not against someone
+      # who can already push workflows to this repo. Fork PRs get no OIDC token. Use ephemeral runners.)
+      - name: Lock down the containers
+        run: echo "LOCKED=--user $(id -u):$(id -g) --cap-drop ALL --security-opt no-new-privileges -e HOME=/tmp" >> "$GITHUB_ENV"
+      - name: Install (in a container)
+        run: |
+          cp -r "$GITHUB_WORKSPACE" /tmp/app
+          docker run --rm $LOCKED -v /tmp/app:/app -w /app "$NODE_IMAGE" sh -c "$INSTALL_COMMAND"
+      - name: Tests (in a container, no network)
         id: tests
         run: |
-          cp -r "$GITHUB_WORKSPACE" /tmp/test
-          if docker run --rm -e CI=true -v /tmp/test:/app -w /app "$NODE_IMAGE" sh -c "$INSTALL_COMMAND && $TEST_COMMAND"; then
+          cp -r /tmp/app /tmp/test
+          if docker run --rm $LOCKED --network none -e CI=true -v /tmp/test:/app -w /app "$NODE_IMAGE" sh -c "$TEST_COMMAND"; then
             echo "passed=true" >> "$GITHUB_OUTPUT"; else echo "passed=false" >> "$GITHUB_OUTPUT"; fi
-      - name: Start this PR's build (in a container)
+      - name: Start this PR's build (in a container, no way out)
         run: |
-          cp -r "$GITHUB_WORKSPACE" /tmp/run
-          docker run -d --name app -p "$PORT:$PORT" -e PORT="$PORT" -v /tmp/run:/app -w /app "$NODE_IMAGE"             sh -c "$INSTALL_COMMAND && $START_COMMAND"
-          for i in $(seq 120); do curl -s -o /dev/null "http://127.0.0.1:$PORT/" && break; sleep 1; done
+          docker network create --internal opsswipe
+          docker run -d --name app $LOCKED --network opsswipe -e PORT="$PORT" -v /tmp/app:/app -w /app "$NODE_IMAGE" \
+            sh -c "$START_COMMAND"
+      - name: Replay the production failures (in a container beside the app)
+        run: |
+          docker run --rm $LOCKED --network opsswipe -v "$GITHUB_WORKSPACE/.opsswipe:/proof:ro" -w /proof "$NODE_IMAGE" \
+            node proof.mjs replay "http://app:$PORT" replays > "$RUNNER_TEMP/results.json"
       - uses: actions/setup-node@v4
         with: { node-version: 22 }
-      - name: Replay production failures and report
+      - name: Report to OpsSwipe
         env:
           TESTS_PASSED: ${{ steps.tests.outputs.passed }}
-        run: node .opsswipe/proof.mjs "http://127.0.0.1:$PORT"
-
+        run: node .opsswipe/proof.mjs report "$RUNNER_TEMP/results.json"
