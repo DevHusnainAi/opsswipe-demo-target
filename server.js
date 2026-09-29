@@ -7,7 +7,7 @@ const { createHmac, timingSafeEqual } = require('node:crypto');
 // Bad-release demo: commit this as false and push (infra/chaos.sh release). It breaks only the
 // pricing API, a path the tests don't cover, so CI passes and deploys it, like a real regression.
 // Requests fail, and OpsSwipe offers a revert or AI fix PR, proven in CI before it can merge.
-const RELEASE_OK = false;
+const RELEASE_OK = true;
 
 const KEY = Buffer.from(process.env.CHAOS_KEY ?? '');
 const bootedAt = new Date().toISOString();
